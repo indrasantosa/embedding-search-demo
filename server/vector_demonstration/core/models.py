@@ -99,9 +99,12 @@ class JobDescription(AbstractBaseModel):
 
     @classmethod
     def import_job_descriptions(cls):
+        print("Importing job descriptions...")
         def get_jobs_csv():
             """Find all the CSV files in the jobs directory and return them as a generator"""
-            data_directory = os.path.join(settings.BASE_DIR, "..", "..", "data", "jobs")
+            data_directory = os.path.join(settings.BASE_DIR, "..", "data", "jobs")
+            print(f"Data directory: {data_directory}")
+
             csv_paths = glob.glob(f"{data_directory}/*.csv")
             for csv_path in csv_paths:
                 with open(csv_path, "r") as f:
@@ -149,12 +152,16 @@ class JobDescription(AbstractBaseModel):
         for job_description in get_job_descriptions():
             count += 1
             print(f"Detecting language for JD #{count} of {total_jds}...")
-            try:
-                language = detect(job_description.description)
-            except LangDetectException:
-                language = ""
-            job_description.language = language
-            job_description.save()
+            print(job_description.language)
+            if job_description.language == "" or job_description.language is None:
+                try:
+                    language = detect(job_description.description)
+                except LangDetectException:
+                    language = ""
+                job_description.language = language
+                job_description.save()
+            else:
+                print("Skipping, language already detected.")
 
     def generate_embeddings(self):
         def strip_html_tags(text):
@@ -193,6 +200,26 @@ class JobDescription(AbstractBaseModel):
             )
 
         JobDescriptionChunk.objects.bulk_create(jd_chunks)
+
+    @classmethod
+    def process_embeddings(cls):
+        def get_en_jobs():
+            page_size = 10
+            num_pages = cls.objects.count() // page_size + 1
+            for page in range(num_pages):
+                qs = cls.objects.filter(language="en")[page * page_size : (page + 1) * page_size]
+                for job_description in qs:
+                    yield job_description
+
+        count = 0
+        total_jds = cls.objects.filter(language="").count()
+        for job_description in get_en_jobs():
+            count += 1
+            print(f"Generating embedding chunks for JD #{count} of {total_jds}...")
+            try:
+                job_description.generate_embeddings()
+            except Exception:
+                print(f"Error generating embeddings for {job_description.title}")
 
     @classmethod
     def search(cls, query=None):
